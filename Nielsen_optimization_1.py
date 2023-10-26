@@ -9,11 +9,13 @@ import torch.nn as nn
 from torch import optim
 from torch.nn import utils
 import matplotlib.pyplot as plt
+import torchvision.models as models
 
 from ipywidgets import IntProgress
 from IPython.display import display
 from matplotlib import pyplot as plt, rc
 from matplotlib.animation import FuncAnimation, PillowWriter
+import matplotlib.animation as animation
 rc('animation', html='jshtml')
 from jupyterthemes import jtplot
 jtplot.style(theme='grade3', context='notebook', ticks=True, grid=False)
@@ -22,14 +24,10 @@ logger = logging.getLogger(__name__)
 
 # environment parameters
 FRAME_TIME = 0.1  # time interval
-GRAVITY_ACCEL_Y = 0.12  # gravity constant in Y direction
-GRAVITY_ACCEL_X =0.  # gravity constant in X direction
-BOOST_ACCEL = 0.18  # thrust constant
 OMEGA_RATE1 = 0.1  # max rotation rate
 OMEGA_RATE2 = 0.1
 L1 = 1
 L2 = 1
-
 
 class Dynamics(nn.Module):
 
@@ -53,33 +51,33 @@ class Dynamics(nn.Module):
         # but this is not allowed in PyTorch since it overwrites one variable (x[1]) that is part of the computational graph to be differentiated.
         # Therefore, I define a tensor dx = [0., gravity * delta_time], and do x = x + dx. This is allowed.
 
+        state_3 = torch.zeros((1, 4))
+        state_3[0, 0] = -1 * torch.cos(state[0, 2])*L1 -1 * torch.cos(state[0, 3])*L2
+        state_3[0, 1] = torch.sin(state[0, 2])*L1 + torch.sin(state[0, 3])*L2
+
 
         state_1 = torch.zeros((1, 4))
-        state_1[0, 0] = torch.sin(state[0, 2])*L1
-        state_1[0, 1] = torch.cos(state[0, 2])*L1
         state_1[0, 2] = OMEGA_RATE1
 
         delta_state_1 = FRAME_TIME * torch.mul(state_1, action[0, 0].reshape(-1, 1))
 
         state_2 = torch.zeros((1, 4))
-        state_2[0, 0] = torch.sin(state[0, 3]) * L2
-        state_2[0, 1] = torch.cos(state[0, 3]) * L2
         state_2[0, 3] = OMEGA_RATE2
 
         delta_state_2 = FRAME_TIME * torch.mul(state_2, action[0, 1].reshape(-1, 1))
 
 
         # Update state
-        step_mat = torch.tensor([[1., 0., 0., 0.],
-                                 [0., 1., 0., 0.],
+        step_mat = torch.tensor([[0., 0., 0., 0.],
+                                 [0., 0., 0., 0.],
                                  [0., 0., 1., 0.],
-                                 [0., 0., 0., 1.],])
+                                 [0., 0., 0., 1.]])
 
 
         state = torch.matmul(step_mat, state.T)
         state = state.T
 
-        state = state + delta_state_1 + delta_state_2
+        state = state + delta_state_1 + delta_state_2 + state_3
 
         return state
 
@@ -130,11 +128,11 @@ class Simulation(nn.Module):
 
     @staticmethod
     def initialize_state():
-        state = [[-2.,0.,0.,0.]]
+        state = [[-2.,0.,0.,0.],[0.,0.,0.,np.pi]]
         return torch.tensor(state, requires_grad=False).float()
 
     def error(self, state):
-        return torch.mean(state ** 2)
+        return torch.mean((state[0,1] - 1) ** 2) + torch.mean(state[0,0] ** 2)
 
 
 class Optimize:
@@ -184,31 +182,33 @@ class Optimize:
     # Define result visualization method
 
     def visualize(self):
-        data = np.array([self.simulation.state_trajectory[i][0].detach().numpy() for i in range(self.simulation.T)])
-        x = data[:, 0]
-        y = data[:, 1]
-        vx = data[:, 2]
-        vy = data[:, 3]
-        action_data = np.array(
-            [self.simulation.action_trajectory[i][0].detach().numpy() for i in range(self.simulation.T)])
-        thrust = action_data[:, 0]
-        frame = range(self.simulation.T)
 
-        fig, ax = plt.subplots(1, 2, tight_layout=1, figsize=(15, 5))
+        if self.epoch == 49:
+            data = np.array([self.simulation.state_trajectory[i][0].detach().numpy() for i in range(self.simulation.T)])
+            x = data[:, 0]
+            y = data[:, 1]
+            vx = data[:, 2]
+            vy = data[:, 3]
+            action_data = np.array(
+                [self.simulation.action_trajectory[i][0].detach().numpy() for i in range(self.simulation.T)])
+            thrust = action_data[:, 0]
+            frame = range(self.simulation.T)
 
-        ax[0].plot(x, y, c='b')
-        ax[0].set_xlabel("X")
-        ax[0].set_ylabel("Y")
-        ax[0].set(title=f'Displacement plot(x-y) at frame {self.epoch}')
+            fig, ax = plt.subplots(1, 2, tight_layout=1, figsize=(15, 5))
 
-        ax[1].plot(frame, vx, c='c', label="theta 1")
-        ax[1].plot(frame, vy, c='r', label="theta2")
-        ax[1].set_xlabel("Time")
-        ax[1].set_ylabel("Theta")
-        ax[1].legend(frameon=0)
-        ax[1].set(title=f'Velocity plot at frame {self.epoch}')
-        plt.show(block=False)
-        plt.close('all')
+            ax[0].plot(x, y, c='b')
+            ax[0].set_xlabel("X")
+            ax[0].set_ylabel("Y")
+            ax[0].set(title=f'Displacement plot(x-y) at frame {self.epoch}')
+
+            ax[1].plot(frame, vx, c='c', label="theta 1")
+            ax[1].plot(frame, vy, c='r', label="theta2")
+            ax[1].set_xlabel("Time")
+            ax[1].set_ylabel("Theta")
+            ax[1].legend(frameon=0)
+            ax[1].set(title=f'Velocity plot at frame {self.epoch}')
+            plt.show()
+
 
 
     def animation(self, epochs):
@@ -219,7 +219,7 @@ class Optimize:
         #
         v_exhaust = 1
         print("Generating Animation")
-        steps = self.simulation.T + 1
+        steps = 500 + 1
         final_time_step = round(1 / steps, 2)
         f = IntProgress(min=0, max=steps)
         display(f)
@@ -236,9 +236,10 @@ class Optimize:
         ax1 = fig.add_subplot(111)
         plt.axhline(y=0., color='b', linestyle='--', lw=0.8)
 
-        ln1, = ax1.plot([], [], linewidth=10, color='lightblue')  # rocket body
+
         ln6, = ax1.plot([], [], '--', linewidth=2, color='orange')  # trajectory line
-        ln2, = ax1.plot([], [], linewidth=4, color='tomato')  # thrust line
+        ln1, = ax1.plot([], [], linewidth=5, color='lightblue')  # Bar 1
+        ln2, = ax1.plot([], [], linewidth=5, color='tomato')  # Bar 2
 
         plt.tight_layout()
 
@@ -247,34 +248,27 @@ class Optimize:
         ax1.set_aspect(1)  # aspect of the axis scaling, i.e. the ratio of y-unit to x-unit
 
         def update(i):
-            rocket_theta = x_t[i, 4]
+            theta1 = x_t[i, 2]
+            theta2 = x_t[i, 3]
 
-            rocket_x = x_t[i, 0]
-            # length/1 is just to make rocket bigger in animation
-            rocket_x_points = [rocket_x + length / 1 * np.sin(rocket_theta),
-                               rocket_x - length / 1 * np.sin(rocket_theta)]
+            Bar1_x = [0. , - np.cos(theta1)]
+            Bar1_y = [0. , np.sin(theta1)]
+            Bar2_x = [- np.cos(theta1) , - np.cos(theta1) - np.cos(theta2)]
+            Bar2_y = [np.sin(theta1) , np.sin(theta1) + np.sin(theta2)]
 
-            rocket_y = x_t[i, 1]
-            rocket_y_points = [rocket_y + length / 1 * np.cos(rocket_theta),
-                               rocket_y - length / 1 * np.cos(rocket_theta)]
+            ln1.set_data(Bar1_x, Bar1_y)
+            ln2.set_data(Bar2_x, Bar2_y)
 
-            ln1.set_data(rocket_x_points, rocket_y_points)
-
-            thrust_mag = u_t[i, 0]
-            thrust_angle = -u_t[i, 1]
-
-            flame_length = (thrust_mag) * (0.4 / v_exhaust)
-            # flame_x_points = [rocket_x_points[1], rocket_x_points[1] + flame_length * np.sin(thrust_angle - rocket_theta)]
-            # flame_y_points = [rocket_y_points[1], rocket_y_points[1] - flame_length * np.cos(thrust_angle - rocket_theta)]
-            flame_x_points = [rocket_x_points[1], rocket_x_points[1] - flame_length * np.sin(rocket_theta)]
-            flame_y_points = [rocket_y_points[1], rocket_y_points[1] - flame_length * np.cos(rocket_theta)]
-
-            ln2.set_data(flame_x_points, flame_y_points)
             ln6.set_data(x_t[:i, 0], x_t[:i, 1])
+
             f.value += 1
 
-        playback_speed = 5000  # the higher the slower
-        anim = FuncAnimation(fig, update, np.arange(0, steps - 1, 1), interval=final_time_step * playback_speed)
+        anim = FuncAnimation(fig, update, np.arange(0, steps - 1, 25), interval=0.000001)
+
+        plt.show()
+
+        writer = PillowWriter(fps=20)
+        anim.save("rocket_landing111.gif", writer=writer)
 
 
 T = 500  # number of time steps of the simulation
@@ -285,4 +279,4 @@ d = Dynamics()
 c = Controller(dim_input, dim_hidden, dim_output)
 s = Simulation(c, d, T)
 o = Optimize(s)
-o.train(50)  # training with number of epochs (gradient descent steps)
+o.train(15)  # training with number of epochs (gradient descent steps)
