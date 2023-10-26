@@ -268,7 +268,7 @@ class Optimize:
         plt.show()
 
         writer = PillowWriter(fps=20)
-        anim.save("rocket_landing111.gif", writer=writer)
+        anim.save("Animation_1.gif", writer=writer)
 
 
 T = 500  # number of time steps of the simulation
