@@ -49,30 +49,30 @@ class Dynamics(nn.Module):
         state[4] = theta 3
 
         """
-        # Apply gravity
-        # Note: Here gravity is used to change velocity which is the second element of the state vector
-        # Normally, we would do x[1] = x[1] + gravity * delta_time
-        # but this is not allowed in PyTorch since it overwrites one variable (x[1]) that is part of the computational graph to be differentiated.
-        # Therefore, I define a tensor dx = [0., gravity * delta_time], and do x = x + dx. This is allowed.
-
+        # updata x and y data from theta
         state_3 = torch.zeros((10, 5))
         state_3[:, 0] = -1 * torch.cos(state[:, 2])*L1 -1 * torch.cos(state[:, 3])*L2 -1 * torch.cos(state[:, 4])*L3
         state_3[:, 1] = torch.sin(state[:, 2])*L1 + torch.sin(state[:, 3])*L2 + torch.sin(state[:, 4])*L3
 
-
+        # limit theta dot 1
         state_1 = torch.zeros((10, 5))
         state_1[:, 2] = OMEGA_RATE1
-
+        
+        # using action variable to control theta dot 1
         delta_state_1 = FRAME_TIME * torch.mul(state_1, action[:, 0].reshape(-1, 1))
-
+        
+        # limit theta dot 2
         state_2 = torch.zeros((10, 5))
         state_2[:, 3] = OMEGA_RATE2
-
+        
+        # using action variable to control theta dot 2
         delta_state_2 = FRAME_TIME * torch.mul(state_2, action[:, 1].reshape(-1, 1))
-
+        
+        # limit theta dot 3
         state_4 = torch.zeros((10, 5))
         state_4[:, 4] = OMEGA_RATE3
-
+        
+        # using action variable to control theta dot 3
         delta_state_4 = FRAME_TIME * torch.mul(state_4, action[:, 2].reshape(-1, 1))
 
 
@@ -111,7 +111,7 @@ class Controller(nn.Module):
 
     def forward(self, state):
         action = self.network(state)
-        action = (action - torch.tensor([0.5, 0.5, 0.5])) * 2  # bound theta_dot range -1 to 1
+        action = (action - torch.tensor([0.5, 0.5, 0.5])) * 2  # bound theta_dot action variable range (-1 to 1)* omegarate
         return action
 
 
@@ -146,6 +146,7 @@ class Simulation(nn.Module):
         return torch.tensor(state, requires_grad=False).float()
 
     def error(self, state):
+        # reduce error at point (0.5, 1.5)
         return torch.mean((state[:, 1] - 1.5) ** 2) + torch.mean((state[:, 0] - 0.5) ** 2)
 
 
@@ -209,7 +210,7 @@ class Optimize:
             fig, ax = plt.subplots(1, 3, tight_layout=1, figsize=(15, 5))
             fig2, ax1 = plt.subplots()
             circle1 = plt.Circle((0.5, 1.5), 0.1)
-
+            # only print last training data
             for i in range(10):
                 x = data[i, :, 0]
                 y = data[i,:, 1]
